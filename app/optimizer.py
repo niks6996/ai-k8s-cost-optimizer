@@ -1,54 +1,113 @@
 import json
 
 
-def load_metrics(file_path):
-    with open(file_path, "r") as file:
-        return json.load(file)
+CPU_OVERPROVISION_THRESHOLD = 40
+MEMORY_OVERPROVISION_THRESHOLD = 50
+
+CPU_HIGH_THRESHOLD = 90
+MEMORY_HIGH_THRESHOLD = 90
 
 
 def calculate_percentage(usage, request):
+
+    if request == 0:
+        return 0
+
     return (usage / request) * 100
 
 
-def analyse_workloads(metrics):
+def validate_workload(workload):
+
+    required_fields = [
+        "pod",
+        "cpu_request",
+        "cpu_usage",
+        "memory_request",
+        "memory_usage"
+    ]
+
+    for field in required_fields:
+
+        if field not in workload:
+            return False
+
+    return True
+
+
+def generate_recommendations(workload):
+
+    recommendations = []
+
+    pod_name = workload["pod"]
+
+    cpu_request = workload["cpu_request"]
+    cpu_usage = workload["cpu_usage"]
+
+    memory_request = workload["memory_request"]
+    memory_usage = workload["memory_usage"]
+
+    cpu_percentage = calculate_percentage(cpu_usage, cpu_request)
+    memory_percentage = calculate_percentage(memory_usage, memory_request)
+
+    print(f"\nAnalysing pod: {pod_name}")
+
+    print(f"CPU Usage: {cpu_percentage:.2f}%")
+    print(f"Memory Usage: {memory_percentage:.2f}%")
+
+    if cpu_percentage < CPU_OVERPROVISION_THRESHOLD:
+
+        recommendations.append(
+            "Reduce CPU requests"
+        )
+
+    if memory_percentage < MEMORY_OVERPROVISION_THRESHOLD:
+
+        recommendations.append(
+            "Reduce memory requests"
+        )
+
+    if cpu_percentage > CPU_HIGH_THRESHOLD:
+
+        recommendations.append(
+            "WARNING: High CPU usage"
+        )
+
+    if memory_percentage > MEMORY_HIGH_THRESHOLD:
+
+        recommendations.append(
+            "WARNING: High memory usage"
+        )
+
+    return {
+        "pod": pod_name,
+        "cpu_usage_percentage": round(cpu_percentage, 2),
+        "memory_usage_percentage": round(memory_percentage, 2),
+        "recommendations": recommendations
+    }
+
+
+def analyse_metrics(metrics):
+
+    results = []
 
     for workload in metrics:
 
-        pod_name = workload["pod"]
+        if not validate_workload(workload):
 
-        cpu_request = workload["cpu_request"]
-        cpu_usage = workload["cpu_usage"]
+            print("Invalid workload data detected")
+            continue
 
-        memory_request = workload["memory_request"]
-        memory_usage = workload["memory_usage"]
+        recommendation = generate_recommendations(workload)
 
-        cpu_percentage = calculate_percentage(cpu_usage, cpu_request)
-        memory_percentage = calculate_percentage(memory_usage, memory_request)
+        results.append(recommendation)
 
-        print(f"\nAnalysing pod: {pod_name}")
-
-        print(f"CPU Usage: {cpu_percentage:.2f}%")
-        print(f"Memory Usage: {memory_percentage:.2f}%")
-
-        if cpu_percentage < 40:
-            print("CPU appears over-provisioned")
-
-        if memory_percentage < 50:
-            print("Memory appears over-provisioned")
-
-        if cpu_percentage > 90:
-            print("WARNING: CPU usage is very high")
-
-        if memory_percentage > 90:
-            print("WARNING: Memory usage is very high")
+    return results
 
 
-def main():
+def save_recommendations(results):
 
-    metrics = load_metrics("metrics.json")
+    with open("recommendations.json", "w") as file:
 
-    analyse_workloads(metrics)
+        json.dump(results, file, indent=4)
 
-
-if __name__ == "__main__":
-    main()
+    print("\nRecommendations saved successfully")

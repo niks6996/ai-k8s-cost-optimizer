@@ -1,0 +1,35 @@
+[
+    {
+        "pod": "frontend-app",
+        "cpu_usage_percentage": 24.0,
+        "memory_usage_percentage": 39.06,
+        "recommendations": [
+            "Reduce CPU requests",
+            "Reduce memory requests"
+        ]
+    },
+    {
+        "pod": "backend-api",
+        "cpu_usage_percentage": 35.0,
+        "memory_usage_percentage": 39.06,
+        "recommendations": [
+            "Reduce CPU requests",
+            "Reduce memory requests"
+        ]
+    },
+    {
+        "pod": "worker-service",
+        "cpu_usage_percentage": 87.5,
+        "memory_usage_percentage": 83.01,
+        "recommendations": []
+    },
+    {
+        "pod": "analytics-job",
+        "cpu_usage_percentage": 13.33,
+        "memory_usage_percentage": 14.65,
+        "recommendations": [
+            "Reduce CPU requests",
+            "Reduce memory requests"
+        ]
+    }
+]
