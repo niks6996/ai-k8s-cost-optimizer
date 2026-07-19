@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# Environment variables
+.env
+
+# Terraform (used later)
+.terraform/
+*.tfstate
+*.tfstate.*
+
+# Kubernetes secrets (used later)
+secret.yaml
