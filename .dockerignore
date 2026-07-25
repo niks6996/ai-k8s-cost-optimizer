@@ -1,0 +1,16 @@
+.git
+.github
+__pycache__
+*.pyc
+*.pyo
+.venv
+venv
+.env
+*.log
+recommendations.json
+terraform
+k8s
+helm
+monitoring
+security
+docs
