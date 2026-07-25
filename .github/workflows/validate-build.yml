@@ -26,7 +26,11 @@ jobs:
         run: find . -maxdepth 3 -type f | sort
 
       - name: Validate Python syntax
-        run: python3 -m py_compile app/main.py app/optimizer.py
+        run: python3 -m py_compile app/main.py app/optimizer.py app/test_optimizer.py
+
+      - name: Run unit tests
+        working-directory: app
+        run: python3 -m unittest -v test_optimizer.py
 
       - name: Validate mock metrics JSON
         run: python3 -m json.tool app/metrics.json > /dev/null
