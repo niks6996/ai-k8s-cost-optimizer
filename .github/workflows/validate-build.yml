@@ -1,4 +1,4 @@
-name: Validate and Build Optimizer
+name: Validate, Test and Secure Optimizer
 
 on:
   push:
@@ -13,10 +13,10 @@ permissions:
   contents: read
 
 jobs:
-  validate-and-build:
-    name: Validate Python and Docker
+  validate-test-build:
+    name: Validate, Test, Build and Scan
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout repository
@@ -48,9 +48,33 @@ jobs:
       - name: Build Docker image
         run: docker build --tag ai-k8s-cost-optimizer:${{ github.sha }} .
 
+      - name: Scan Docker image with Trivy
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: ai-k8s-cost-optimizer:${{ github.sha }}
+          format: table
+          output: trivy-report.txt
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "0"
+
+      - name: Display Trivy report
+        run: cat trivy-report.txt
+
+      - name: Upload Trivy security report
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-security-report
+          path: trivy-report.txt
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Run optimizer container
         run: |
-          docker run             --name cost-optimizer             ai-k8s-cost-optimizer:${{ github.sha }}
+          docker run \
+            --name cost-optimizer \
+            ai-k8s-cost-optimizer:${{ github.sha }}
 
       - name: Display container logs
         if: always()
@@ -71,7 +95,9 @@ jobs:
       - name: Copy container recommendations
         run: |
           mkdir -p artifacts
-          docker cp             cost-optimizer:/app/recommendations.json             artifacts/recommendations.json
+          docker cp \
+            cost-optimizer:/app/recommendations.json \
+            artifacts/recommendations.json
 
       - name: Validate container recommendations
         run: |
