@@ -1,0 +1,84 @@
+name: Validate and Build Optimizer
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-and-build:
+    name: Validate Python and Docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Display project structure
+        run: find . -maxdepth 3 -type f | sort
+
+      - name: Validate Python syntax
+        run: python3 -m py_compile app/main.py app/optimizer.py
+
+      - name: Validate mock metrics JSON
+        run: python3 -m json.tool app/metrics.json > /dev/null
+
+      - name: Run optimizer directly
+        working-directory: app
+        run: python3 main.py
+
+      - name: Validate direct-run recommendations
+        run: |
+          test -f app/recommendations.json
+          grep -q '"pod": "frontend-app"' app/recommendations.json
+          grep -q '"recommendations"' app/recommendations.json
+
+      - name: Build Docker image
+        run: docker build --tag ai-k8s-cost-optimizer:${{ github.sha }} .
+
+      - name: Run optimizer container
+        run: |
+          docker run             --name cost-optimizer             ai-k8s-cost-optimizer:${{ github.sha }}
+
+      - name: Display container logs
+        if: always()
+        run: docker logs cost-optimizer || true
+
+      - name: Verify container completed successfully
+        run: |
+          EXIT_CODE="$(docker inspect cost-optimizer --format='{{.State.ExitCode}}')"
+          echo "Container exit code: ${EXIT_CODE}"
+          test "${EXIT_CODE}" -eq 0
+
+      - name: Verify container runs as non-root
+        run: |
+          CONTAINER_USER="$(docker run --rm ai-k8s-cost-optimizer:${{ github.sha }} id -u)"
+          echo "Runtime UID: ${CONTAINER_USER}"
+          test "${CONTAINER_USER}" != "0"
+
+      - name: Copy container recommendations
+        run: |
+          mkdir -p artifacts
+          docker cp             cost-optimizer:/app/recommendations.json             artifacts/recommendations.json
+
+      - name: Validate container recommendations
+        run: |
+          python3 -m json.tool artifacts/recommendations.json
+          grep -q '"pod": "frontend-app"' artifacts/recommendations.json
+          grep -q '"recommendations"' artifacts/recommendations.json
+
+      - name: Upload recommendation report
+        uses: actions/upload-artifact@v4
+        with:
+          name: optimizer-recommendations
+          path: artifacts/recommendations.json
+          if-no-files-found: error
+          retention-days: 7
