@@ -1,0 +1,64 @@
+name: Validate Helm Chart
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "helm/**"
+      - ".github/workflows/validate-helm.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "helm/**"
+      - ".github/workflows/validate-helm.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-helm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: latest
+
+      - name: Lint default chart
+        run: helm lint helm/ai-k8s-cost-optimizer
+
+      - name: Lint development values
+        run: helm lint helm/ai-k8s-cost-optimizer --values helm/ai-k8s-cost-optimizer/values-dev.yaml
+
+      - name: Render development manifests
+        run: |
+          mkdir -p rendered
+          helm template optimizer-dev helm/ai-k8s-cost-optimizer             --values helm/ai-k8s-cost-optimizer/values-dev.yaml             > rendered/development.yaml
+
+      - name: Render production manifests
+        run: |
+          helm template optimizer-prod helm/ai-k8s-cost-optimizer             --values helm/ai-k8s-cost-optimizer/values-prod.yaml             --set image.tag="${GITHUB_SHA}"             > rendered/production.yaml
+
+      - name: Validate rendered manifests
+        uses: docker://ghcr.io/yannh/kubeconform:v0.8.0
+        with:
+          entrypoint: /kubeconform
+          args: >-
+            -strict
+            -summary
+            -verbose
+            -kubernetes-version 1.31.0
+            rendered/
+
+      - name: Upload rendered manifests
+        uses: actions/upload-artifact@v4
+        with:
+          name: rendered-helm-manifests
+          path: rendered/
+          if-no-files-found: error
+          retention-days: 7

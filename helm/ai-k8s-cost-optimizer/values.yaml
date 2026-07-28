@@ -1,0 +1,46 @@
+namespace:
+  create: true
+  name: cost-optimizer
+
+image:
+  repository: ghcr.io/niks6996/ai-k8s-cost-optimizer
+  tag: latest
+  pullPolicy: Always
+
+schedule: "0 */6 * * *"
+timeZone: "Etc/UTC"
+concurrencyPolicy: Forbid
+startingDeadlineSeconds: 900
+
+history:
+  successfulJobs: 3
+  failedJobs: 3
+
+job:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 86400
+
+serviceAccount:
+  create: true
+  name: ""
+  automountServiceAccountToken: false
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: false
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi

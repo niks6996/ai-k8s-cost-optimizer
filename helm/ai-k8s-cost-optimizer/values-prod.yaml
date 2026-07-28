@@ -1,0 +1,7 @@
+image:
+  tag: REPLACE_WITH_COMMIT_SHA
+  pullPolicy: IfNotPresent
+
+history:
+  successfulJobs: 5
+  failedJobs: 5
