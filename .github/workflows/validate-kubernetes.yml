@@ -1,0 +1,49 @@
+name: Validate Kubernetes Manifests
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "k8s/**"
+      - ".github/workflows/validate-kubernetes.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "k8s/**"
+      - ".github/workflows/validate-kubernetes.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-manifests:
+    name: Validate Kubernetes YAML
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: latest
+
+      - name: Display kubectl version
+        run: kubectl version --client
+
+      - name: Validate namespace manifest
+        run: kubectl apply --dry-run=client --validate=false -f k8s/namespace.yaml -o yaml
+
+      - name: Validate service account manifest
+        run: kubectl apply --dry-run=client --validate=false -f k8s/serviceaccount.yaml -o yaml
+
+      - name: Validate CronJob manifest
+        run: kubectl apply --dry-run=client --validate=false -f k8s/cronjob.yaml -o yaml
+
+      - name: Validate all Kubernetes manifests together
+        run: kubectl apply --dry-run=client --validate=false -f k8s/ -o name
