@@ -7,12 +7,14 @@ on:
     paths:
       - "k8s/**"
       - ".github/workflows/validate-kubernetes.yml"
+
   pull_request:
     branches:
       - main
     paths:
       - "k8s/**"
       - ".github/workflows/validate-kubernetes.yml"
+
   workflow_dispatch:
 
 permissions:
@@ -26,24 +28,15 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
-      - name: Install kubectl
-        uses: azure/setup-kubectl@v4
+      - name: Validate Kubernetes manifests with Kubeconform
+        uses: docker://ghcr.io/yannh/kubeconform:v0.8.0
         with:
-          version: latest
-
-      - name: Display kubectl version
-        run: kubectl version --client
-
-      - name: Validate namespace manifest
-        run: kubectl apply --dry-run=client --validate=false -f k8s/namespace.yaml -o yaml
-
-      - name: Validate service account manifest
-        run: kubectl apply --dry-run=client --validate=false -f k8s/serviceaccount.yaml -o yaml
-
-      - name: Validate CronJob manifest
-        run: kubectl apply --dry-run=client --validate=false -f k8s/cronjob.yaml -o yaml
-
-      - name: Validate all Kubernetes manifests together
-        run: kubectl apply --dry-run=client --validate=false -f k8s/ -o name
+          entrypoint: /kubeconform
+          args: >-
+            -strict
+            -summary
+            -verbose
+            -kubernetes-version 1.31.0
+            k8s/
