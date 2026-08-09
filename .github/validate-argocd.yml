@@ -1,0 +1,71 @@
+name: Validate ArgoCD Application
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "argocd/**"
+      - ".github/workflows/validate-argocd.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "argocd/**"
+      - ".github/workflows/validate-argocd.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-argocd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check required ArgoCD fields
+        run: |
+          set -euo pipefail
+          FILE="argocd/application.yaml"
+          grep -q '^apiVersion: argoproj.io/v1alpha1$' "$FILE"
+          grep -q '^kind: Application$' "$FILE"
+          grep -q 'repoURL: https://github.com/niks6996/ai-k8s-cost-optimizer.git' "$FILE"
+          grep -q 'path: helm/ai-k8s-cost-optimizer' "$FILE"
+          grep -q 'server: https://kubernetes.default.svc' "$FILE"
+          grep -q 'namespace: cost-optimizer' "$FILE"
+
+      - name: Check referenced Helm chart exists
+        run: |
+          test -f helm/ai-k8s-cost-optimizer/Chart.yaml
+          test -f helm/ai-k8s-cost-optimizer/values-prod.yaml
+          test -d helm/ai-k8s-cost-optimizer/templates
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: latest
+
+      - name: Render ArgoCD source
+        run: |
+          mkdir -p rendered-argocd
+          helm template ai-k8s-cost-optimizer             helm/ai-k8s-cost-optimizer             --values helm/ai-k8s-cost-optimizer/values-prod.yaml             --set image.tag=latest             > rendered-argocd/application-resources.yaml
+
+      - name: Validate rendered resources
+        uses: docker://ghcr.io/yannh/kubeconform:v0.8.0
+        with:
+          entrypoint: /kubeconform
+          args: >-
+            -strict
+            -summary
+            -verbose
+            -kubernetes-version 1.31.0
+            rendered-argocd/
+
+      - name: Upload rendered GitOps resources
+        uses: actions/upload-artifact@v4
+        with:
+          name: argocd-rendered-resources
+          path: rendered-argocd/
+          if-no-files-found: error
+          retention-days: 7

@@ -1,0 +1,29 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ai-k8s-cost-optimizer
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/niks6996/ai-k8s-cost-optimizer.git
+    targetRevision: main
+    path: helm/ai-k8s-cost-optimizer
+    helm:
+      valueFiles:
+        - values-prod.yaml
+      parameters:
+        - name: image.tag
+          value: latest
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cost-optimizer
+  syncPolicy:
+    automated:
+      enabled: true
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
