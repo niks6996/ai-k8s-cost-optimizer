@@ -1,0 +1,24 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cost-optimizer-reader
+  namespace: cost-optimizer
+  labels:
+    app.kubernetes.io/name: ai-k8s-cost-optimizer
+    app.kubernetes.io/component: optimizer
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - get
+      - list
+
+  - apiGroups:
+      - metrics.k8s.io
+    resources:
+      - pods
+    verbs:
+      - get
+      - list

@@ -1,0 +1,117 @@
+name: Validate Kubernetes RBAC
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "k8s/role.yaml"
+      - "k8s/rolebinding.yaml"
+      - "helm/ai-k8s-cost-optimizer/templates/role.yaml"
+      - "helm/ai-k8s-cost-optimizer/templates/rolebinding.yaml"
+      - "helm/ai-k8s-cost-optimizer/values.yaml"
+      - ".github/workflows/validate-rbac.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "k8s/role.yaml"
+      - "k8s/rolebinding.yaml"
+      - "helm/ai-k8s-cost-optimizer/templates/role.yaml"
+      - "helm/ai-k8s-cost-optimizer/templates/rolebinding.yaml"
+      - "helm/ai-k8s-cost-optimizer/values.yaml"
+      - ".github/workflows/validate-rbac.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-rbac:
+    name: Validate Least-Privilege RBAC
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Reject wildcard RBAC permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if grep -REn '^[[:space:]]*-[[:space:]]*"\*"[[:space:]]*$'             k8s/role.yaml             helm/ai-k8s-cost-optimizer/templates/role.yaml; then
+            echo "Wildcard RBAC permission detected."
+            exit 1
+          fi
+
+          echo "No wildcard RBAC permissions detected."
+
+      - name: Confirm only read verbs are granted
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for forbidden in create update patch delete deletecollection impersonate bind escalate; do
+            if grep -REn "^[[:space:]]*-[[:space:]]*${forbidden}[[:space:]]*$"               k8s/role.yaml               helm/ai-k8s-cost-optimizer/templates/role.yaml; then
+              echo "Forbidden RBAC verb detected: ${forbidden}"
+              exit 1
+            fi
+          done
+
+          echo "RBAC is read-only."
+
+      - name: Validate raw RBAC manifests
+        uses: docker://ghcr.io/yannh/kubeconform:v0.8.0
+        with:
+          entrypoint: /kubeconform
+          args: >-
+            -strict
+            -summary
+            -verbose
+            -kubernetes-version 1.31.0
+            k8s/role.yaml
+            k8s/rolebinding.yaml
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: latest
+
+      - name: Lint Helm chart with RBAC
+        run: helm lint helm/ai-k8s-cost-optimizer
+
+      - name: Render Helm RBAC resources
+        run: |
+          mkdir -p rendered-rbac
+
+          helm template optimizer             helm/ai-k8s-cost-optimizer             --set rbac.create=true             > rendered-rbac/all-resources.yaml
+
+      - name: Confirm rendered Role and RoleBinding exist
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          grep -q '^kind: Role$' rendered-rbac/all-resources.yaml
+          grep -q '^kind: RoleBinding$' rendered-rbac/all-resources.yaml
+          grep -q 'metrics.k8s.io' rendered-rbac/all-resources.yaml
+
+          echo "Rendered RBAC resources are present."
+
+      - name: Validate rendered Helm resources
+        uses: docker://ghcr.io/yannh/kubeconform:v0.8.0
+        with:
+          entrypoint: /kubeconform
+          args: >-
+            -strict
+            -summary
+            -verbose
+            -kubernetes-version 1.31.0
+            rendered-rbac/
+
+      - name: Upload rendered RBAC evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: rendered-rbac-resources
+          path: rendered-rbac/
+          if-no-files-found: error
+          retention-days: 7
