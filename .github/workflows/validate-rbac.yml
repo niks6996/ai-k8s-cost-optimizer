@@ -39,7 +39,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          if grep -REn '^[[:space:]]*-[[:space:]]*"\*"[[:space:]]*$'             k8s/role.yaml             helm/ai-k8s-cost-optimizer/templates/role.yaml; then
+          if grep -REn '^[[:space:]]*-[[:space:]]*"\*"[[:space:]]*$' \
+            k8s/role.yaml \
+            helm/ai-k8s-cost-optimizer/templates/role.yaml; then
             echo "Wildcard RBAC permission detected."
             exit 1
           fi
@@ -52,7 +54,9 @@ jobs:
           set -euo pipefail
 
           for forbidden in create update patch delete deletecollection impersonate bind escalate; do
-            if grep -REn "^[[:space:]]*-[[:space:]]*${forbidden}[[:space:]]*$"               k8s/role.yaml               helm/ai-k8s-cost-optimizer/templates/role.yaml; then
+            if grep -REn "^[[:space:]]*-[[:space:]]*${forbidden}[[:space:]]*$" \
+              k8s/role.yaml \
+              helm/ai-k8s-cost-optimizer/templates/role.yaml; then
               echo "Forbidden RBAC verb detected: ${forbidden}"
               exit 1
             fi
@@ -84,18 +88,38 @@ jobs:
         run: |
           mkdir -p rendered-rbac
 
-          helm template optimizer             helm/ai-k8s-cost-optimizer             --set rbac.create=true             > rendered-rbac/all-resources.yaml
+          helm template optimizer \
+            helm/ai-k8s-cost-optimizer \
+            --set rbac.create=true \
+            > rendered-rbac/all-resources.yaml
+
+      - name: Display rendered Helm resources
+        run: |
+          echo "===== Rendered Helm resources ====="
+          cat rendered-rbac/all-resources.yaml
+          echo "==================================="
 
       - name: Confirm rendered Role and RoleBinding exist
         shell: bash
         run: |
           set -euo pipefail
 
-          grep -q '^kind: Role$' rendered-rbac/all-resources.yaml
-          grep -q '^kind: RoleBinding$' rendered-rbac/all-resources.yaml
-          grep -q 'metrics.k8s.io' rendered-rbac/all-resources.yaml
+          if ! grep -Eq '^[[:space:]]*kind:[[:space:]]*Role[[:space:]]*$' rendered-rbac/all-resources.yaml; then
+            echo "ERROR: Rendered Role was not found."
+            exit 1
+          fi
 
-          echo "Rendered RBAC resources are present."
+          if ! grep -Eq '^[[:space:]]*kind:[[:space:]]*RoleBinding[[:space:]]*$' rendered-rbac/all-resources.yaml; then
+            echo "ERROR: Rendered RoleBinding was not found."
+            exit 1
+          fi
+
+          if ! grep -Fq 'metrics.k8s.io' rendered-rbac/all-resources.yaml; then
+            echo "ERROR: metrics.k8s.io permission was not found."
+            exit 1
+          fi
+
+          echo "Rendered Role, RoleBinding, and metrics permissions are present."
 
       - name: Validate rendered Helm resources
         uses: docker://ghcr.io/yannh/kubeconform:v0.8.0
