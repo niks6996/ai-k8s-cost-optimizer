@@ -1,0 +1,106 @@
+name: Promote Image to GitOps
+
+on:
+  workflow_run:
+    workflows:
+      - "Validate, Test, Secure and Publish Optimizer"
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "GHCR image tag to promote"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gitops-image-promotion
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Update production image tag
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        (
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == 'main'
+        )
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Resolve image tag
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            IMAGE_TAG="${{ inputs.image_tag }}"
+          else
+            IMAGE_TAG="${{ github.event.workflow_run.head_sha }}"
+          fi
+
+          echo "Promoting image tag: ${IMAGE_TAG}"
+          echo "tag=${IMAGE_TAG}" >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Update production Helm image tag
+        run: |
+          bash scripts/update-image-tag.sh             helm/ai-k8s-cost-optimizer/values-prod.yaml             "${{ steps.image.outputs.tag }}"
+
+      - name: Remove ArgoCD latest-tag override
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("argocd/application.yaml")
+          text = path.read_text(encoding="utf-8")
+
+          block = (
+              "      parameters:\n"
+              "        - name: image.tag\n"
+              "          value: latest\n"
+          )
+
+          if block in text:
+              text = text.replace(block, "")
+              path.write_text(text, encoding="utf-8")
+              print("Removed temporary ArgoCD image.tag=latest override.")
+          else:
+              print("Temporary ArgoCD latest override already absent.")
+          PY
+
+      - name: Show GitOps changes
+        run: |
+          git diff --             helm/ai-k8s-cost-optimizer/values-prod.yaml             argocd/application.yaml
+
+      - name: Commit promoted image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if git diff --quiet; then
+            echo "GitOps state already references this image. Nothing to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add             helm/ai-k8s-cost-optimizer/values-prod.yaml             argocd/application.yaml
+
+          git commit -m "Promote optimizer image ${{ steps.image.outputs.tag }}"
+          git push origin HEAD:main
