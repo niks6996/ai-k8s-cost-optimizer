@@ -2,6 +2,9 @@ namespace:
   create: true
   name: cost-optimizer
 
+rbac:
+  create: true
+  
 image:
   repository: ghcr.io/niks6996/ai-k8s-cost-optimizer
   tag: latest
