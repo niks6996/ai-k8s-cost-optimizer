@@ -1,0 +1,50 @@
+name: Cost Analysis
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/cost_analyzer.py"
+      - "tests/test_cost_analyzer.py"
+      - ".github/workflows/validate-cost-analysis.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "app/cost_analyzer.py"
+      - "tests/test_cost_analyzer.py"
+      - ".github/workflows/validate-cost-analysis.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-cost-analysis:
+    name: Test Cost and Utilisation Analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install project dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+          pip install pytest
+
+      - name: Run Day 16 unit tests
+        run: |
+          python -m pytest tests/test_cost_analyzer.py -v
+
+      - name: Run complete test suite
+        run: |
+          python -m pytest -v
