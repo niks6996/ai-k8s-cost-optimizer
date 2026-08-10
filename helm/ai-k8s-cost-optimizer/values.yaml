@@ -27,6 +27,7 @@ serviceAccount:
   create: true
   name: ""
   automountServiceAccountToken: false
+  tokenExpirationSeconds: 3600
 
 podSecurityContext:
   runAsNonRoot: true

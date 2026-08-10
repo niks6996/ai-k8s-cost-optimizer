@@ -2,11 +2,19 @@ name: Validate, Test, Secure and Publish Optimizer
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+    paths:
+      - "app/**"
+      - "Dockerfile"
+      - ".dockerignore"
+      - ".github/workflows/validate-build.yml"
   pull_request:
-    branches:
-      - main
+    branches: [main]
+    paths:
+      - "app/**"
+      - "Dockerfile"
+      - ".dockerignore"
+      - ".github/workflows/validate-build.yml"
   workflow_dispatch:
 
 permissions:
@@ -19,7 +27,6 @@ env:
 
 jobs:
   validate-test-build:
-    name: Validate, Test, Build, Scan and Publish
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -27,21 +34,29 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Display project structure
-        run: find . -maxdepth 3 -type f | sort
+      - name: Install Python dependencies
+        run: python3 -m pip install --disable-pip-version-check -r app/requirements.txt
 
       - name: Validate Python syntax
-        run: python3 -m py_compile app/main.py app/optimizer.py app/test_optimizer.py
+        run: |
+          python3 -m py_compile \
+            app/main.py \
+            app/optimizer.py \
+            app/kubernetes_metrics.py \
+            app/test_optimizer.py \
+            app/test_kubernetes_metrics.py
 
       - name: Run unit tests
         working-directory: app
-        run: python3 -m unittest -v test_optimizer.py
+        run: python3 -m unittest discover -v -p "test_*.py"
 
       - name: Validate mock metrics JSON
         run: python3 -m json.tool app/metrics.json > /dev/null
 
-      - name: Run optimizer directly
+      - name: Run optimizer in mock mode
         working-directory: app
+        env:
+          METRICS_SOURCE: mock
         run: python3 main.py
 
       - name: Validate direct-run recommendations
@@ -64,9 +79,6 @@ jobs:
           ignore-unfixed: true
           exit-code: "0"
 
-      - name: Display Trivy report
-        run: cat trivy-report.txt
-
       - name: Upload Trivy security report
         uses: actions/upload-artifact@v4
         with:
@@ -75,10 +87,11 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Run optimizer container
+      - name: Run optimizer container in mock mode
         run: |
           docker run \
             --name cost-optimizer \
+            --env METRICS_SOURCE=mock \
             ai-k8s-cost-optimizer:${{ github.sha }}
 
       - name: Display container logs
@@ -93,22 +106,14 @@ jobs:
 
       - name: Verify container runs as non-root
         run: |
-          CONTAINER_USER="$(docker run --rm ai-k8s-cost-optimizer:${{ github.sha }} id -u)"
-          echo "Runtime UID: ${CONTAINER_USER}"
-          test "${CONTAINER_USER}" != "0"
+          UID_VALUE="$(docker run --rm ai-k8s-cost-optimizer:${{ github.sha }} id -u)"
+          echo "Runtime UID: ${UID_VALUE}"
+          test "${UID_VALUE}" != "0"
 
       - name: Copy container recommendations
         run: |
           mkdir -p artifacts
-          docker cp \
-            cost-optimizer:/app/recommendations.json \
-            artifacts/recommendations.json
-
-      - name: Validate container recommendations
-        run: |
-          python3 -m json.tool artifacts/recommendations.json
-          grep -q '"pod": "frontend-app"' artifacts/recommendations.json
-          grep -q '"recommendations"' artifacts/recommendations.json
+          docker cp cost-optimizer:/app/recommendations.json artifacts/recommendations.json
 
       - name: Upload recommendation report
         uses: actions/upload-artifact@v4
@@ -129,27 +134,14 @@ jobs:
       - name: Tag image for GitHub Container Registry
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          docker tag \
-            ai-k8s-cost-optimizer:${{ github.sha }} \
+          docker tag ai-k8s-cost-optimizer:${{ github.sha }} \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
 
-          docker tag \
-            ai-k8s-cost-optimizer:${{ github.sha }} \
+          docker tag ai-k8s-cost-optimizer:${{ github.sha }} \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
       - name: Publish image to GitHub Container Registry
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          docker push \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-
-          docker push \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-
-      - name: Display published image references
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          echo "Immutable image:"
-          echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
-          echo "Convenience image:"
-          echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest

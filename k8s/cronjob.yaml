@@ -3,9 +3,6 @@ kind: CronJob
 metadata:
   name: cost-optimizer
   namespace: cost-optimizer
-  labels:
-    app.kubernetes.io/name: ai-k8s-cost-optimizer
-    app.kubernetes.io/component: optimizer
 spec:
   schedule: "0 */6 * * *"
   timeZone: "Etc/UTC"
@@ -21,9 +18,9 @@ spec:
         metadata:
           labels:
             app.kubernetes.io/name: ai-k8s-cost-optimizer
-            app.kubernetes.io/component: optimizer
         spec:
           serviceAccountName: cost-optimizer
+          automountServiceAccountToken: false
           restartPolicy: Never
           securityContext:
             runAsNonRoot: true
@@ -33,16 +30,40 @@ spec:
             - name: optimizer
               image: ghcr.io/niks6996/ai-k8s-cost-optimizer:latest
               imagePullPolicy: Always
+              env:
+                - name: METRICS_SOURCE
+                  value: kubernetes
+                - name: POD_NAMESPACE
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
               securityContext:
                 allowPrivilegeEscalation: false
                 capabilities:
-                  drop:
-                    - ALL
+                  drop: [ALL]
                 readOnlyRootFilesystem: false
               resources:
-                requests:
-                  cpu: 50m
-                  memory: 64Mi
-                limits:
-                  cpu: 200m
-                  memory: 128Mi
+                requests: {cpu: 50m, memory: 64Mi}
+                limits: {cpu: 200m, memory: 128Mi}
+              volumeMounts:
+                - name: kubernetes-api-access
+                  mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+                  readOnly: true
+          volumes:
+            - name: kubernetes-api-access
+              projected:
+                defaultMode: 420
+                sources:
+                  - serviceAccountToken:
+                      path: token
+                      expirationSeconds: 3600
+                  - configMap:
+                      name: kube-root-ca.crt
+                      items:
+                        - key: ca.crt
+                          path: ca.crt
+                  - downwardAPI:
+                      items:
+                        - path: namespace
+                          fieldRef:
+                            fieldPath: metadata.namespace
