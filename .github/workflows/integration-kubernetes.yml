@@ -1,0 +1,239 @@
+name: Kubernetes Integration Test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "Dockerfile"
+      - "k8s/**"
+      - "helm/**"
+      - ".github/workflows/integration-kubernetes.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "Dockerfile"
+      - "k8s/**"
+      - "helm/**"
+      - ".github/workflows/integration-kubernetes.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    name: Test Optimizer Against Real Kubernetes APIs
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install kind
+        run: |
+          curl --fail --silent --show-error --location \
+            https://kind.sigs.k8s.io/dl/v0.32.0/kind-linux-amd64 \
+            --output kind
+
+          chmod +x kind
+          sudo mv kind /usr/local/bin/kind
+
+          kind version
+
+      - name: Create temporary Kubernetes cluster
+        run: |
+          kind create cluster \
+            --name optimizer-integration \
+            --wait 120s
+
+          kubectl cluster-info
+          kubectl get nodes -o wide
+
+      - name: Build optimizer integration image
+        run: |
+          docker build \
+            --tag ai-k8s-cost-optimizer:integration \
+            .
+
+      - name: Load optimizer image into kind
+        run: |
+          kind load docker-image \
+            ai-k8s-cost-optimizer:integration \
+            --name optimizer-integration
+
+      - name: Install Metrics Server
+        run: |
+          kubectl apply -f \
+            https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.9.0/components.yaml
+
+          kubectl patch deployment metrics-server \
+            --namespace kube-system \
+            --type=json \
+            --patch='[
+              {
+                "op": "add",
+                "path": "/spec/template/spec/containers/0/args/-",
+                "value": "--kubelet-insecure-tls"
+              }
+            ]'
+
+          kubectl rollout status deployment/metrics-server \
+            --namespace kube-system \
+            --timeout=120s
+
+      - name: Deploy optimizer Helm chart
+        run: |
+          helm upgrade --install optimizer \
+            helm/ai-k8s-cost-optimizer \
+            --namespace cost-optimizer \
+            --create-namespace \
+            --set namespace.create=false \
+            --set namespace.name=cost-optimizer \
+            --set image.repository=ai-k8s-cost-optimizer \
+            --set image.tag=integration \
+            --set image.pullPolicy=IfNotPresent \
+            --set metricsSource=kubernetes \
+            --set rbac.create=true
+
+          kubectl get all \
+            --namespace cost-optimizer
+
+      - name: Deploy sample workload for metrics
+        run: |
+          kubectl apply -f k8s/test/sample-workload.yaml
+
+          kubectl rollout status deployment/sample-workload \
+            --namespace cost-optimizer \
+            --timeout=120s
+
+      - name: Verify least-privilege RBAC
+        run: |
+          SERVICE_ACCOUNT="system:serviceaccount:cost-optimizer:ai-k8s-cost-optimizer"
+
+          kubectl auth can-i list pods \
+            --namespace cost-optimizer \
+            --as="${SERVICE_ACCOUNT}"
+
+          kubectl auth can-i get pods \
+            --namespace cost-optimizer \
+            --as="${SERVICE_ACCOUNT}"
+
+          kubectl auth can-i list pods.metrics.k8s.io \
+            --namespace cost-optimizer \
+            --as="${SERVICE_ACCOUNT}"
+
+          if kubectl auth can-i delete pods \
+            --namespace cost-optimizer \
+            --as="${SERVICE_ACCOUNT}" | grep -qx "yes"; then
+            echo "ERROR: ServiceAccount must not be allowed to delete Pods."
+            exit 1
+          fi
+
+          if kubectl auth can-i get secrets \
+            --namespace cost-optimizer \
+            --as="${SERVICE_ACCOUNT}" | grep -qx "yes"; then
+            echo "ERROR: ServiceAccount must not be allowed to read Secrets."
+            exit 1
+          fi
+
+          echo "Least-privilege RBAC checks passed."
+
+      - name: Wait for Metrics API data
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for attempt in {1..24}; do
+            echo "Metrics API attempt ${attempt}/24"
+
+            if kubectl top pods \
+              --namespace cost-optimizer; then
+              exit 0
+            fi
+
+            sleep 5
+          done
+
+          echo "Metrics API did not become ready."
+          kubectl get apiservice v1beta1.metrics.k8s.io -o yaml || true
+          kubectl logs \
+            --namespace kube-system \
+            deployment/metrics-server || true
+          exit 1
+
+      - name: Create one-off optimizer Job from CronJob
+        run: |
+          kubectl create job \
+            --from=cronjob/ai-k8s-cost-optimizer \
+            optimizer-integration-run \
+            --namespace cost-optimizer
+
+          kubectl wait \
+            --for=condition=complete \
+            job/optimizer-integration-run \
+            --namespace cost-optimizer \
+            --timeout=180s
+
+      - name: Capture optimizer logs
+        if: always()
+        run: |
+          mkdir -p integration-artifacts
+
+          kubectl logs \
+            job/optimizer-integration-run \
+            --namespace cost-optimizer \
+            | tee integration-artifacts/optimizer.log || true
+
+          kubectl top pods \
+            --namespace cost-optimizer \
+            | tee integration-artifacts/pod-metrics.txt || true
+
+          kubectl get role,rolebinding,serviceaccount,cronjob,job,pod \
+            --namespace cost-optimizer \
+            -o wide \
+            | tee integration-artifacts/kubernetes-resources.txt || true
+
+      - name: Validate optimizer used Kubernetes mode
+        run: |
+          grep -q "Metrics source: Kubernetes API" \
+            integration-artifacts/optimizer.log
+
+          grep -q "Analysing pod:" \
+            integration-artifacts/optimizer.log
+
+          grep -q "Recommendations saved successfully" \
+            integration-artifacts/optimizer.log
+
+      - name: Upload Kubernetes integration evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kubernetes-integration-evidence
+          path: integration-artifacts/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Display troubleshooting information on failure
+        if: failure()
+        run: |
+          echo "===== Namespace resources ====="
+          kubectl get all \
+            --namespace cost-optimizer \
+            -o wide || true
+
+          echo "===== Events ====="
+          kubectl get events \
+            --namespace cost-optimizer \
+            --sort-by=.lastTimestamp || true
+
+          echo "===== Optimizer Pods ====="
+          kubectl get pods \
+            --namespace cost-optimizer \
+            -o yaml || true
+
+          echo "===== Metrics API ====="
+          kubectl get apiservice v1beta1.metrics.k8s.io \
+            -o yaml || true

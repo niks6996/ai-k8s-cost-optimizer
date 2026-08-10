@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sample-workload
+  namespace: cost-optimizer
+  labels:
+    app.kubernetes.io/name: sample-workload
+    app.kubernetes.io/part-of: ai-k8s-cost-optimizer-integration-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sample-workload
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sample-workload
+    spec:
+      containers:
+        - name: workload
+          image: registry.k8s.io/e2e-test-images/resource-consumer:1.13
+          command:
+            - /consume-cpu/consume-cpu
+          args:
+            - --millicores=20
+            - --duration-sec=3600
+          resources:
+            requests:
+              cpu: 100m
+              memory: 32Mi
+            limits:
+              cpu: 150m
+              memory: 64Mi
