@@ -10,9 +10,11 @@ COPY app/optimizer.py .
 COPY app/kubernetes_metrics.py .
 COPY app/metrics.json .
 
-RUN useradd --create-home --uid 10001 optimizer \
-    && chown -R optimizer:optimizer /app
+# Use an explicit numeric UID/GID so Kubernetes can verify runAsNonRoot.
+RUN groupadd --gid 10001 optimizer \
+    && useradd --create-home --uid 10001 --gid 10001 optimizer \
+    && chown -R 10001:10001 /app
 
-USER optimizer
+USER 10001:10001
 
 CMD ["python", "main.py"]
