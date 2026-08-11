@@ -1,5 +1,5 @@
 image:
-  tag: 7312617cc7dd424de0093600d086bcc8cfd4feb2
+  tag: eab80a57c1b4d30efa2bb9823b5f7fefee62bafc
   pullPolicy: IfNotPresent
 
 history:
