@@ -1,0 +1,50 @@
+name: Validate Day 17 Recommendation Engine
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/recommendation_engine.py"
+      - "tests/test_recommendation_engine.py"
+      - ".github/workflows/validate-recommendation-engine.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "app/recommendation_engine.py"
+      - "tests/test_recommendation_engine.py"
+      - ".github/workflows/validate-recommendation-engine.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-recommendation-engine:
+    name: Test Recommendation Engine
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+          pip install pytest
+
+      - name: Run Day 17 unit tests
+        run: |
+          python -m pytest tests/test_recommendation_engine.py -v
+
+      - name: Run complete test suite
+        run: |
+          python -m pytest -v
