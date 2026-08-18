@@ -1,0 +1,11 @@
+apiVersion: 1
+providers:
+  - name: ai-k8s-cost-optimizer
+    orgId: 1
+    folder: Kubernetes Optimizer
+    type: file
+    disableDeletion: true
+    editable: false
+    updateIntervalSeconds: 10
+    options:
+      path: /var/lib/grafana/dashboards
