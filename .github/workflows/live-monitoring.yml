@@ -24,6 +24,7 @@ jobs:
     name: Build Live Monitoring Evidence
     runs-on: ubuntu-latest
     timeout-minutes: 25
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -45,9 +46,7 @@ jobs:
 
       - name: Install kind
         run: |
-          curl --fail --silent --show-error --location \
-            https://kind.sigs.k8s.io/dl/v0.32.0/kind-linux-amd64 \
-            --output kind
+          curl --fail --silent --show-error --location             https://kind.sigs.k8s.io/dl/v0.32.0/kind-linux-amd64             --output kind
           chmod +x kind
           sudo mv kind /usr/local/bin/kind
 
@@ -59,39 +58,36 @@ jobs:
       - name: Build and load optimizer image
         run: |
           docker build -t ai-k8s-cost-optimizer:monitoring .
-          kind load docker-image ai-k8s-cost-optimizer:monitoring --name optimizer-monitoring
+          kind load docker-image             ai-k8s-cost-optimizer:monitoring             --name optimizer-monitoring
 
       - name: Install Metrics Server
         run: |
-          kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.9.0/components.yaml
-          kubectl patch deployment metrics-server --namespace kube-system --type=json --patch='[
-            {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}
-          ]'
-          kubectl rollout status deployment/metrics-server -n kube-system --timeout=120s
+          kubectl apply -f             https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.9.0/components.yaml
+          kubectl patch deployment metrics-server             --namespace kube-system             --type=json             --patch='[
+              {
+                "op":"add",
+                "path":"/spec/template/spec/containers/0/args/-",
+                "value":"--kubelet-insecure-tls"
+              }
+            ]'
+          kubectl rollout status deployment/metrics-server             -n kube-system --timeout=120s
 
       - name: Install optimizer RBAC through Helm
         run: |
-          helm upgrade --install optimizer helm/ai-k8s-cost-optimizer \
-            --namespace cost-optimizer \
-            --create-namespace \
-            --set namespace.create=false \
-            --set namespace.name=cost-optimizer \
-            --set image.repository=ai-k8s-cost-optimizer \
-            --set image.tag=monitoring \
-            --set image.pullPolicy=IfNotPresent \
-            --set metricsSource=kubernetes \
-            --set rbac.create=true
+          helm upgrade --install optimizer             helm/ai-k8s-cost-optimizer             --namespace cost-optimizer             --create-namespace             --set namespace.create=false             --set namespace.name=cost-optimizer             --set image.repository=ai-k8s-cost-optimizer             --set image.tag=monitoring             --set image.pullPolicy=IfNotPresent             --set metricsSource=kubernetes             --set rbac.create=true
 
       - name: Deploy sample workload
         run: |
           kubectl apply -f k8s/test/sample-workload.yaml
-          kubectl rollout status deployment/sample-workload -n cost-optimizer --timeout=120s
+          kubectl rollout status deployment/sample-workload             -n cost-optimizer --timeout=120s
 
       - name: Wait for Metrics API
         shell: bash
         run: |
           for attempt in {1..24}; do
-            if kubectl top pods -n cost-optimizer; then exit 0; fi
+            if kubectl top pods -n cost-optimizer; then
+              exit 0
+            fi
             sleep 5
           done
           exit 1
@@ -99,15 +95,15 @@ jobs:
       - name: Deploy live optimizer metrics endpoint
         run: |
           kubectl apply -f monitoring/optimizer/metrics-deployment.yaml
-          kubectl rollout status deployment/optimizer-metrics -n cost-optimizer --timeout=120s
+          kubectl rollout status deployment/optimizer-metrics             -n cost-optimizer --timeout=120s
 
       - name: Verify optimizer metrics endpoint
         run: |
-          kubectl port-forward -n cost-optimizer svc/optimizer-metrics 8000:8000 >/tmp/optimizer-pf.log 2>&1 &
-          sleep 3
           mkdir -p monitoring-evidence
-          curl --fail http://127.0.0.1:8000/metrics | tee monitoring-evidence/optimizer-metrics.txt
-          grep -q "optimizer_workloads_analyzed_total" monitoring-evidence/optimizer-metrics.txt
+          kubectl port-forward -n cost-optimizer             svc/optimizer-metrics 8000:8000             >/tmp/optimizer-pf.log 2>&1 &
+          sleep 3
+          curl --fail http://127.0.0.1:8000/metrics             | tee monitoring-evidence/optimizer-metrics.txt
+          grep -q "optimizer_workloads_analyzed_total"             monitoring-evidence/optimizer-metrics.txt
 
       - name: Deploy Prometheus and Grafana
         run: |
@@ -115,52 +111,52 @@ jobs:
           kubectl apply -f monitoring/prometheus/configmap.yaml
           kubectl apply -f monitoring/prometheus/deployment.yaml
           kubectl apply -f monitoring/grafana/deployment.yaml
-          kubectl rollout status deployment/prometheus -n monitoring --timeout=120s
-          kubectl rollout status deployment/grafana -n monitoring --timeout=120s
+
+          kubectl rollout status deployment/prometheus             -n monitoring --timeout=120s
+          kubectl rollout status deployment/grafana             -n monitoring --timeout=120s
 
       - name: Verify Prometheus scrape
         shell: bash
         run: |
-          kubectl port-forward -n monitoring svc/prometheus 9090:9090 >/tmp/prometheus-pf.log 2>&1 &
+          kubectl port-forward -n monitoring             svc/prometheus 9090:9090             >/tmp/prometheus-pf.log 2>&1 &
           sleep 3
+
           for attempt in {1..24}; do
-            curl -fsS 'http://127.0.0.1:9090/api/v1/query?query=optimizer_workloads_analyzed_total' > monitoring-evidence/prometheus-query.json || true
-            if grep -q '"status":"success"' monitoring-evidence/prometheus-query.json && grep -q '"result":\[' monitoring-evidence/prometheus-query.json; then
+            curl -fsS               'http://127.0.0.1:9090/api/v1/query?query=optimizer_workloads_analyzed_total'               > monitoring-evidence/prometheus-query.json || true
+
+            RESULT_COUNT="$(
+              jq '.data.result | length'                 monitoring-evidence/prometheus-query.json                 2>/dev/null || echo 0
+            )"
+
+            if [ "${RESULT_COUNT}" -gt 0 ]; then
               cat monitoring-evidence/prometheus-query.json
               exit 0
             fi
+
             sleep 5
           done
+
           cat monitoring-evidence/prometheus-query.json || true
           exit 1
 
       - name: Verify Grafana health
         run: |
-          kubectl port-forward -n monitoring svc/grafana 3000:3000 >/tmp/grafana-pf.log 2>&1 &
+          kubectl port-forward -n monitoring             svc/grafana 3000:3000             >/tmp/grafana-pf.log 2>&1 &
           sleep 5
-          curl --fail http://127.0.0.1:3000/api/health | tee monitoring-evidence/grafana-health.json
+          curl --fail http://127.0.0.1:3000/api/health             | tee monitoring-evidence/grafana-health.json
 
       - name: Capture Grafana dashboard screenshot
         run: |
           npm init -y >/dev/null 2>&1
           npm install playwright@1.55.0
           npx playwright install --with-deps chromium
-          cat > /tmp/capture-dashboard.js <<'JS'
-          const { chromium } = require('playwright');
-          (async () => {
-            const browser = await chromium.launch({headless: true});
-            const page = await browser.newPage({viewport: {width: 1600, height: 1100}});
-            await page.goto('http://127.0.0.1:3000/d/optimizer-dashboard/ai-kubernetes-cost-performance-optimizer?orgId=1&from=now-15m&to=now&kiosk', {waitUntil: 'networkidle', timeout: 60000});
-            await page.waitForTimeout(10000);
-            await page.screenshot({path: 'monitoring-evidence/grafana-dashboard.png', fullPage: true});
-            await browser.close();
-          })();
-JS
-          node /tmp/capture-dashboard.js
+          node monitoring/grafana/capture_dashboard.js
 
       - name: Capture monitoring resources
         if: always()
-        run: kubectl get pods,svc -A -o wide > monitoring-evidence/kubernetes-monitoring-resources.txt || true
+        run: |
+          mkdir -p monitoring-evidence
+          kubectl get pods,svc -A -o wide             > monitoring-evidence/kubernetes-monitoring-resources.txt || true
 
       - name: Upload monitoring evidence
         if: always()
